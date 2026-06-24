@@ -1,6 +1,18 @@
 # Flask DevOps Project
 
-A production-ready Python Flask web application demonstrating a complete DevOps lifecycle — containerized with Docker, automated via GitHub Actions CI/CD, and deployed on AWS EC2 with Nginx as a reverse proxy and CloudWatch monitoring.
+A production-ready Python Flask web application demonstrating a complete DevOps lifecycle — containerized with Docker, automated via GitHub Actions CI/CD, and deployed on Render.com with Nginx reverse proxy configuration.
+
+---
+
+## Live Demo
+
+🌐 **[https://flask-devops-app.onrender.com](https://flask-devops-app.onrender.com)**
+
+| Endpoint | Description |
+|---|---|
+| `/` | App status + version info |
+| `/health` | Health check |
+| `/info` | Environment + version metadata |
 
 ---
 
@@ -12,10 +24,8 @@ A production-ready Python Flask web application demonstrating a complete DevOps 
 | Containerization | Docker, Docker Compose |
 | CI/CD | GitHub Actions |
 | Registry | Docker Hub (versioned tags) |
-| Cloud | AWS EC2 (Ubuntu 22.04) |
+| Deployment | Render.com |
 | Reverse Proxy | Nginx |
-| Monitoring | AWS CloudWatch + SNS Alerts |
-| Security | IAM Roles, EC2 Security Groups |
 
 ---
 
@@ -29,14 +39,11 @@ flask-devops-project/
 │   └── test_app.py               # Pytest unit tests
 ├── nginx/
 │   └── nginx.conf                # Nginx reverse proxy config
-├── scripts/
-│   ├── ec2-setup.sh              # One-time EC2 provisioning script
-│   └── cloudwatch-setup.sh       # CloudWatch agent + alarms setup
 ├── .github/
 │   └── workflows/
 │       └── ci-cd.yml             # GitHub Actions CI/CD pipeline
 ├── Dockerfile                    # Multi-stage Docker build
-├── docker-compose.yml            # Local + production orchestration
+├── docker-compose.yml            # Local development orchestration
 ├── requirements.txt
 ├── .env.example
 └── .gitignore
@@ -44,13 +51,33 @@ flask-devops-project/
 
 ---
 
-## API Endpoints
+## CI/CD Pipeline (GitHub Actions)
 
-| Route | Method | Description |
-|---|---|---|
-| `/` | GET | App status + version info |
-| `/health` | GET | Health check (used by Docker + Nginx) |
-| `/info` | GET | Environment + version metadata |
+The workflow in `.github/workflows/ci-cd.yml` runs automatically on every push to `main`:
+
+```
+Push to main
+    │
+    ▼
+[Job 1] Run Tests (pytest)
+    │
+    ▼
+[Job 2] Build Docker Image → Push to Docker Hub
+        Tags: latest, v<run_number>
+    │
+    ▼
+[Job 3] Trigger Auto Deploy → Render.com
+```
+
+### Required GitHub Secrets
+
+Go to **Settings → Secrets and variables → Actions** and add:
+
+| Secret | Description |
+|---|---|
+| `DOCKER_HUB_TOKEN` | Docker Hub access token |
+| `RENDER_API_KEY` | Render account API key |
+| `RENDER_SERVICE_ID` | Render service ID (starts with `srv-`) |
 
 ---
 
@@ -63,14 +90,14 @@ flask-devops-project/
 ### Run with Docker Compose
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/flask-devops-project.git
+git clone https://github.com/SanketSudrik/flask-devops-project.git
 cd flask-devops-project
 
 docker-compose up --build
 ```
 
-App: http://localhost  
-Direct (no Nginx): http://localhost:5000
+App via Nginx: `http://localhost`
+App direct: `http://localhost:5000`
 
 ### Run Tests Locally
 
@@ -81,107 +108,58 @@ pytest tests/ -v
 
 ---
 
-## CI/CD Pipeline (GitHub Actions)
+## Deployment — Render.com
 
-The workflow in `.github/workflows/ci-cd.yml` runs on every push to `main`:
+This project is deployed on **Render.com** using Docker runtime.
 
-```
-Push to main
-    │
-    ▼
-[Job 1] Run Tests (pytest)
-    │
-    ▼
-[Job 2] Build Docker Image → Push to Docker Hub
-        Tags: latest, v<run_number>, sha-<commit>
-    │
-    ▼
-[Job 3] SSH into EC2 → Pull image → docker-compose up
-```
+### Manual Setup Steps
 
-### Required GitHub Secrets
+**Step 1 — Create account**
+- Go to [render.com](https://render.com) and sign up with GitHub
 
-Go to **Settings → Secrets and variables → Actions** and add:
+**Step 2 — Create Web Service**
+- Click **New +** → **Web Service**
+- Connect your GitHub repository
+- Select **Docker** as runtime
+- Region: Singapore
+- Instance type: Free
 
-| Secret | Description |
+**Step 3 — Add Environment Variables**
+
+| Key | Value |
 |---|---|
-| `DOCKER_HUB_USERNAME` | Your Docker Hub username |
-| `DOCKER_HUB_TOKEN` | Docker Hub access token (not your password) |
-| `EC2_HOST` | Public IP or DNS of your EC2 instance |
-| `EC2_SSH_KEY` | Contents of your EC2 `.pem` private key |
+| `FLASK_ENV` | `production` |
+| `APP_VERSION` | `1.0.0` |
+| `PORT` | `5000` |
+
+**Step 4 — Deploy**
+- Click **Create Web Service**
+- Render builds and deploys automatically
+- Live URL provided after deploy
+
+### Auto Deploy via GitHub Actions
+
+Every push to `main` triggers:
+1. Tests run on GitHub Actions
+2. Docker image built and pushed to Docker Hub
+3. Render API called to redeploy latest image
 
 ---
 
-## AWS EC2 Deployment
+## Docker Hub
 
-### Step 1 — Launch EC2 Instance
+Images are pushed with versioned tags on every CI run:
 
-- AMI: Ubuntu 22.04 LTS
-- Instance type: t2.micro (free tier) or t3.small
-- Storage: 20 GB gp3
+```
+sanketsudrik/flask-devops-app:latest
+sanketsudrik/flask-devops-app:v1
+sanketsudrik/flask-devops-app:v2
+```
 
-### Step 2 — Configure Security Group
-
-| Type | Protocol | Port | Source |
-|---|---|---|---|
-| SSH | TCP | 22 | Your IP only |
-| HTTP | TCP | 80 | 0.0.0.0/0 |
-| Custom (Flask) | TCP | 5000 | 0.0.0.0/0 |
-
-### Step 3 — Attach IAM Role
-
-Create an IAM role with these policies and attach to EC2:
-- `CloudWatchAgentServerPolicy`
-- `AmazonSSMManagedInstanceCore` (optional, for SSM access)
-
-### Step 4 — Run Setup Script
-
-SSH into EC2 and run:
-
+Pull and run locally:
 ```bash
-chmod +x scripts/ec2-setup.sh
-./scripts/ec2-setup.sh
-```
-
-This installs Docker, Docker Compose, clones the repo, and starts the app.
-
----
-
-## CloudWatch Monitoring
-
-Set up monitoring with the provided script:
-
-```bash
-# Edit the SNS_EMAIL variable in the script first
-chmod +x scripts/cloudwatch-setup.sh
-./scripts/cloudwatch-setup.sh
-```
-
-### Alerts Configured
-
-| Alarm | Threshold | Period |
-|---|---|---|
-| CPU High | > 80% | 5 min (2 eval periods) |
-| Memory High | > 85% | 5 min (2 eval periods) |
-| Disk Full | > 80% | 5 min (1 eval period) |
-
-Alerts are sent via **SNS → Email**.
-
----
-
-## Docker Hub Tags
-
-Images are pushed with three tags on every successful CI run:
-
-```
-yourusername/flask-devops-app:latest
-yourusername/flask-devops-app:v42          ← GitHub run number
-yourusername/flask-devops-app:sha-a1b2c3   ← Git commit SHA
-```
-
-Pull a specific version:
-```bash
-docker pull yourusername/flask-devops-app:v42
+docker pull sanketsudrik/flask-devops-app:latest
+docker run -p 5000:5000 sanketsudrik/flask-devops-app:latest
 ```
 
 ---
@@ -200,5 +178,5 @@ Copy `.env.example` to `.env` for local overrides (never commit `.env`).
 
 ## Author
 
-**Your Name**  
-[GitHub](https://github.com/YOUR_USERNAME) · [LinkedIn](https://linkedin.com/in/YOUR_PROFILE)
+Sanket Sudrik
+[GitHub](https://github.com/SanketSudrik) · 
